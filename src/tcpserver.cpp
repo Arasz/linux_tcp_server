@@ -12,12 +12,9 @@ namespace mrobot
 /**
  * @brief Construct server object listening on default port
  */
-tcp_server::tcp_server()
+tcp_server::tcp_server(): tcp_server(22222)
 {
-	this->create_socket();
-	this->bind_socket(_port);
-	this->listen_for_connection();
-	this->accept_connection();
+
 }
 
 /**
@@ -29,7 +26,11 @@ tcp_server::tcp_server(int port):_port(port)
 	this->create_socket();
 	this->bind_socket(_port);
 	this->listen_for_connection();
-	this->accept_connection();
+
+	// wait for connection in another thread
+	std::thread accept_connection(&tcp_server::accept_connection, this);
+	// detach thread - it will run in background without synchronization with main thread
+	accept_connection.detach();
 }
 
 tcp_server::~tcp_server()
@@ -76,7 +77,7 @@ void tcp_server::bind_socket(int port)
 	int bind_ret_val = bind(_listen_socket_fd, reinterpret_cast<sockaddr*>(&socket_addres), sizeof(socket_addres));
 
 	if(bind_ret_val < 0 )
-		throw tcp_server_exception{"Binding socket to address failed."};
+		throw tcp_server_exception{"Binding socket to address failed.", strerror(errno)};
 
 }
 

@@ -19,6 +19,8 @@
 #include <cstring>
 #include <vector>
 #include <array>
+#include <thread>
+#include <errno.h>
 
 namespace mrobot
 {
@@ -41,7 +43,8 @@ private:
 	void listen_for_connection();
 	void accept_connection();
 
-	bool _is_connected = false;
+	std::thread _read_data_thread; /// thread in which we are polling socket for data
+	bool _is_connected = false; /// indicates if client is connected to the server
 	const size_t _buffer_size = 255; /// communication buffer size
 	char _buffer[255]; /// communication buffer
 	int _listen_socket_fd = 0; /// server socket file descriptor
