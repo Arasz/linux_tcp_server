@@ -21,6 +21,7 @@
 #include <array>
 #include <thread>
 #include <errno.h>
+#include <sys/poll.h>
 
 namespace mrobot
 {
@@ -31,11 +32,15 @@ public:
 	tcp_server();
 	tcp_server(int port);
 	virtual ~tcp_server();
+
 	void send_data(char* buffer, int length);
 	void send_data(std::vector<char>&buffer);
 	int read_data();
 	std::vector<char> get_data(int length);
 	bool is_connected();
+	void subscribe_data_ready_event(std::function<void()>& data_ready_handler);
+	void unsubscribe_data_ready_event();
+
 
 private:
 	void create_socket();
@@ -43,6 +48,8 @@ private:
 	void listen_for_connection();
 	void accept_connection();
 
+	bool _data_ready_event_subscirbed = false; /// indicates if data ready event is subscribed
+	std::function<void()> _data_ready_handler;
 	std::thread _read_data_thread; /// thread in which we are polling socket for data
 	bool _is_connected = false; /// indicates if client is connected to the server
 	const size_t _buffer_size = 255; /// communication buffer size

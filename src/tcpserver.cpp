@@ -51,7 +51,7 @@ void tcp_server::create_socket()
 	_listen_socket_fd = socket(PF_INET, SOCK_STREAM, 0); // | SOCK_NONBLOCK, 0);
 
 	if(_listen_socket_fd<0)
-		throw tcp_server_exception{"Error when opening socket.\n"};
+		throw tcp_server_exception{"Error when opening socket.", strerror(errno)};
 }
 
 /**
@@ -88,7 +88,7 @@ void tcp_server::bind_socket(int port)
 void tcp_server::listen_for_connection()
 {
 	if(_listen_socket_fd <= 0)
-		throw tcp_server_exception{"Socket isn't valid. Before listening create socket."};
+		throw tcp_server_exception{"Socket isn't valid. Before listening create socket.", strerror(errno)};
 	listen(_listen_socket_fd, 5);
 }
 /**
@@ -106,7 +106,7 @@ void tcp_server::send_data(char* buffer, int length)
 	if(byte_count < length)
 		std::cerr<<"Less data written than expected.";
 	if(byte_count < 0)
-		throw tcp_server_exception{"Error when sending data"};
+		throw tcp_server_exception{"Error when sending data", strerror(errno)};
 }
 
 void tcp_server::send_data(std::vector<char>& buffer)
@@ -129,7 +129,7 @@ void tcp_server::send_data(std::vector<char>& buffer)
 	if(byte_count < length)
 		std::cerr<<"Less data written than expected.";
 	if(byte_count < 0)
-		throw tcp_server_exception{"Error when sending data"};
+		throw tcp_server_exception{"Error when sending data", strerror(errno)};
 }
 
 /**
@@ -144,6 +144,30 @@ std::vector<char> tcp_server::get_data(int length)
 }
 
 /**
+ * @brief Assigns event handler called on data ready event
+ * @param data_ready_handler function object with event handler
+ */
+void tcp_server::subscribe_data_ready_event(
+		std::function<void()>& data_ready_handler)
+{
+	if(_data_ready_event_subscirbed == false)
+	{
+		_data_ready_event_subscirbed = true;
+		_data_ready_handler = data_ready_handler;
+	}
+}
+/**
+ * @brief Unsubscribe data ready event handler
+ */
+void tcp_server::unsubscribe_data_ready_event()
+{
+	if(_data_ready_event_subscirbed)
+	{
+		_data_ready_event_subscirbed = false;
+	}
+}
+
+/**
  * @brief Accept connection from client and creates new socket for communication
  * @throws tcp_server_exception
  */
@@ -153,7 +177,7 @@ void tcp_server::accept_connection()
 	_client_socket_fd = accept(_listen_socket_fd, reinterpret_cast<sockaddr*>(&_client_addres), &client_address_size);
 
 	if(_client_socket_fd < 0)
-		throw tcp_server_exception("Error when accepting connection.\n");
+		throw tcp_server_exception("Error when accepting connection.", strerror(errno));
 	_is_connected = true;
 
 }
@@ -175,7 +199,7 @@ int tcp_server::read_data()
 		_is_connected = false;
 	}
 	if(bytes_count < 0)
-		throw tcp_server_exception{"Error reading data from socket"};
+		throw tcp_server_exception{"Error reading data from socket", strerror(errno)};
 	return bytes_count;
 }
 /**
