@@ -8,6 +8,35 @@
 #include "tcpserver.h"
 #include <vector>
 #include <iostream>
+#include <functional>
+#include <atomic>
+#include <signal.h>
+#include <cctype>
+
+using namespace std;
+
+void echo(mrobot::tcp_server& server,vector<char>& data)
+{
+	if(server.is_connected())
+	{
+		server.send_data(data);
+		string str_data;
+
+		cout<<"Sent data: ";
+		for(const char& c : data)
+		{
+			cout<<c;
+			if(isalpha(c))
+				str_data.push_back(c);
+		}
+
+		cout<<"Data size: "<<data.size()<<endl;
+		cout<<"String size: "<<str_data.size()<<" String: "<<str_data;
+		if(str_data.compare("exit") == 0)
+			throw runtime_error{"Exit received"};
+
+	}
+}
 
 void test_server_set_up()
 {
@@ -18,6 +47,10 @@ void test_server_set_up()
 	{
 		tcp_server server;
 
+		function<void(mrobot::tcp_server&,vector<char>&)> data_ready_handler = echo;
+
+		server.subscribe_data_ready_event(data_ready_handler);
+
 		cout<< "Server object constructed\n";
 
 		while(true)
@@ -25,21 +58,14 @@ void test_server_set_up()
 			if(server.is_connected())
 			{
 				was_connected = true;
-				int bytes_count = server.read_data();
-				cout<<"Read bytes: "<<bytes_count<<"\n";
-				auto data = server.get_data(bytes_count);
-				std::cout<<"Input data: ";
-				for(char& c: data)
-				{
-					std::cout<<c;
-				}
-				std::cout<<std::endl;
-				server.send_data(data);
 			}
 			else if(was_connected&&!server.is_connected())
 			{
 				was_connected = false;
-				cout<<"Disconnected...";
+				cout<<endl;
+				cout<<"Disconnected..."<<endl;
+				server.reconnect();
+				cout<<"Reconnecting..."<<endl;
 			}
 		}
 	}

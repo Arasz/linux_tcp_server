@@ -27,16 +27,17 @@ tcp_server::tcp_server(int port):_port(port)
 	this->bind_socket(_port);
 	this->listen_for_connection();
 
-	// wait for connection in another thread
-	std::thread accept_connection(&tcp_server::accept_connection, this);
-	// detach thread - it will run in background without synchronization with main thread
-	accept_connection.detach();
+	this->reconnect();
+
+	// run another thread which will poll client socket for data
+	_read_data_thread = std::thread(&tcp_server::poll_client_socket, this);
 }
 
 tcp_server::~tcp_server()
 {
 	close(_listen_socket_fd);
 	close(_client_socket_fd);
+	_read_data_thread.join(); // join polling thread
 }
 
 /**
@@ -65,7 +66,7 @@ void tcp_server::bind_socket(int port)
 
 	// set all values in buffer to a zero
 	//bzero(reinterpret_cast<char*>(&socket_addres), sizeof(socket_addres));
-	std::memset(reinterpret_cast<char*>(&socket_addres), 0, sizeof(socket_addres));
+	std::memset(&socket_addres, 0, sizeof(socket_addres));
 
 	// set address family for ipv4
 	socket_addres.sin_family = AF_INET;
@@ -91,25 +92,31 @@ void tcp_server::listen_for_connection()
 		throw tcp_server_exception{"Socket isn't valid. Before listening create socket.", strerror(errno)};
 	listen(_listen_socket_fd, 5);
 }
+
+/**
+ * @brief Waits for incoming connection and accepts it if is available
+ */
+void tcp_server::reconnect()
+{
+	if(_client_socket_fd > 0)
+	{
+		close(_client_socket_fd);
+		_is_connected = false;
+	}
+
+	// wait for connection in another thread
+	std::thread accept_connection(&tcp_server::accept_connection, this);
+	// detach thread - it will run in background without synchronization with main thread
+	accept_connection.detach();
+}
+
 /**
  * @brief Send data to connected client
  * @param buffer data buffer
  * @param length data buffer length in bytes
  * @throws tcp_server_exception
  */
-void tcp_server::send_data(char* buffer, int length)
-{
-	// send can send less data than we want in nonblocking mode
-	int byte_count = send(_client_socket_fd, buffer, length, 0);
-
-	//TODO Change this behavior
-	if(byte_count < length)
-		std::cerr<<"Less data written than expected.";
-	if(byte_count < 0)
-		throw tcp_server_exception{"Error when sending data", strerror(errno)};
-}
-
-void tcp_server::send_data(std::vector<char>& buffer)
+void tcp_server::send_data(const std::vector<char>& buffer)
 {
 	int length = buffer.size();
 
@@ -117,7 +124,7 @@ void tcp_server::send_data(std::vector<char>& buffer)
 	char data[length];
 
 	int i = 0;
-	for(char& c:buffer)
+	for(const char& c:buffer)
 	{
 		data[i++] = c;
 	}
@@ -132,23 +139,12 @@ void tcp_server::send_data(std::vector<char>& buffer)
 		throw tcp_server_exception{"Error when sending data", strerror(errno)};
 }
 
-/**
- * @brief Gets data from server buffer
- * @param buffer
- * @param length
- */
-std::vector<char> tcp_server::get_data(int length)
-{
-	std::vector<char> data(_buffer, _buffer+length);
-	return data;
-}
 
 /**
  * @brief Assigns event handler called on data ready event
  * @param data_ready_handler function object with event handler
  */
-void tcp_server::subscribe_data_ready_event(
-		std::function<void()>& data_ready_handler)
+void tcp_server::subscribe_data_ready_event(const data_ready_event_handler& data_ready_handler)
 {
 	if(_data_ready_event_subscirbed == false)
 	{
@@ -174,6 +170,9 @@ void tcp_server::unsubscribe_data_ready_event()
 void tcp_server::accept_connection()
 {
 	unsigned int client_address_size = sizeof(_client_addres);
+	std::memset(&_client_addres, 0, client_address_size);
+
+
 	_client_socket_fd = accept(_listen_socket_fd, reinterpret_cast<sockaddr*>(&_client_addres), &client_address_size);
 
 	if(_client_socket_fd < 0)
@@ -187,7 +186,7 @@ void tcp_server::accept_connection()
  * @return read bytes count
  * @throws tcp_server_exception
  */
-int tcp_server::read_data()
+void tcp_server::read_data()
 {
 	std::memset(_buffer, 0, _buffer_size);
 
@@ -200,15 +199,59 @@ int tcp_server::read_data()
 	}
 	if(bytes_count < 0)
 		throw tcp_server_exception{"Error reading data from socket", strerror(errno)};
-	return bytes_count;
+
+	// copy data from internal buffer to output buffer
+	_output_data_buffer.clear();
+	for(int i = 0; i<bytes_count; i++)
+	{
+		_output_data_buffer.push_back(_buffer[i]);
+	}
 }
 /**
  * @brief Gets connection state
  * @return connection state
  */
-bool tcp_server::is_connected()
+bool tcp_server::is_connected() const
 {
 	return _is_connected;
+}
+
+/**
+ * @brief Polls client socket for data to read
+ * This method is using linux sytem poll() function.
+ * @throws tcp_server_exception
+ */
+void tcp_server::poll_client_socket()
+{
+	//TODO exception is thrown in another thread and is not easy catchable - repair
+	while(true)
+	{
+		if(_is_connected)
+		{
+			if(!_are_poll_objects_initialized)
+			{
+				_ufds[0].fd = _client_socket_fd;
+				_ufds[0].events = POLLIN; // alert when data is ready do recv() on socket
+				_are_poll_objects_initialized = true;
+			}
+
+			// events_count equal to zero means timeout
+			int events_count = poll(_ufds, _observed_sockets_count, _timeout );
+
+			if(events_count<0)
+				throw tcp_server_exception{"Error when polling client socket.", strerror(errno)};
+			else
+			{
+				if(_ufds[0].revents & POLLIN)
+				{
+					// data ready to recev()
+					read_data();
+					if(_data_ready_event_subscirbed)
+						_data_ready_handler(*this,_output_data_buffer);
+				}
+			}
+		}
+	}
 }
 
 } /* namespace mrobot */
