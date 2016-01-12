@@ -5,6 +5,7 @@
  *      Author: rafal
  */
 
+#include <poll_controler.h>
 #include "tcpserver.h"
 #include <vector>
 #include <iostream>
@@ -46,17 +47,21 @@ void test_server_set_up()
 	try
 	{
 		tcp_server server;
+		poll_controler poller;
 
 		function<void(mrobot::tcp_server&,vector<char>&)> data_ready_handler = echo;
 
 		server.subscribe_data_ready_event(data_ready_handler);
 
+
 		cout<< "Server object constructed\n";
 
 		while(true)
 		{
-			if(server.is_connected())
+			if(server.is_connected()&&!was_connected)
 			{
+				poller.attach(&server);
+				poller.start_polling();
 				was_connected = true;
 			}
 			else if(was_connected&&!server.is_connected())
@@ -64,6 +69,8 @@ void test_server_set_up()
 				was_connected = false;
 				cout<<endl;
 				cout<<"Disconnected..."<<endl;
+				poller.detach(&server);
+				poller.stop_polling();
 				server.reconnect();
 				cout<<"Reconnecting..."<<endl;
 			}

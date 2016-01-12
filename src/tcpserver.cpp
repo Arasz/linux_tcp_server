@@ -28,16 +28,12 @@ tcp_server::tcp_server(int port):_port(port)
 	this->listen_for_connection();
 
 	this->reconnect();
-
-	// run another thread which will poll client socket for data
-	_read_data_thread = std::thread(&tcp_server::poll_client_socket, this);
 }
 
 tcp_server::~tcp_server()
 {
 	close(_listen_socket_fd);
 	close(_client_socket_fd);
-	_read_data_thread.join(); // join polling thread
 }
 
 /**
@@ -110,6 +106,18 @@ void tcp_server::reconnect()
 	accept_connection.detach();
 }
 
+void tcp_server::process_data()
+{
+	std::cerr<<"update called\n";
+	read_data();
+	if(_is_data_ready_event_subscirbed)
+		_data_ready_handler(*this, _output_data_buffer);
+}
+int tcp_server::get_file_descriptor()
+{
+	return _client_socket_fd;
+}
+
 /**
  * @brief Send data to connected client
  * @param buffer data buffer
@@ -146,9 +154,9 @@ void tcp_server::send_data(const std::vector<char>& buffer)
  */
 void tcp_server::subscribe_data_ready_event(const data_ready_event_handler& data_ready_handler)
 {
-	if(_data_ready_event_subscirbed == false)
+	if(_is_data_ready_event_subscirbed == false)
 	{
-		_data_ready_event_subscirbed = true;
+		_is_data_ready_event_subscirbed = true;
 		_data_ready_handler = data_ready_handler;
 	}
 }
@@ -157,9 +165,9 @@ void tcp_server::subscribe_data_ready_event(const data_ready_event_handler& data
  */
 void tcp_server::unsubscribe_data_ready_event()
 {
-	if(_data_ready_event_subscirbed)
+	if(_is_data_ready_event_subscirbed)
 	{
-		_data_ready_event_subscirbed = false;
+		_is_data_ready_event_subscirbed = false;
 	}
 }
 
@@ -180,6 +188,7 @@ void tcp_server::accept_connection()
 	_is_connected = true;
 
 }
+
 
 /**
  * @brief Read data from client and write to class buffer
@@ -216,44 +225,6 @@ bool tcp_server::is_connected() const
 	return _is_connected;
 }
 
-/**
- * @brief Polls client socket for data to read
- * This method is using linux sytem poll() function.
- * @throws tcp_server_exception
- */
-void tcp_server::poll_client_socket()
-{
-	//TODO exception is thrown in another thread and is not easy catchable - repair
-	while(true)
-	{
-		if(_is_connected)
-		{
-			if(!_are_poll_objects_initialized)
-			{
-				_ufds[0].fd = _client_socket_fd;
-				_ufds[0].events = POLLIN; // alert when data is ready do recv() on socket
-				_are_poll_objects_initialized = true;
-			}
-
-			// events_count equal to zero means timeout
-			int events_count = poll(_ufds, _observed_sockets_count, _timeout );
-
-			if(events_count<0)
-				throw tcp_server_exception{"Error when polling client socket.", strerror(errno)};
-			else
-			{
-				if(_ufds[0].revents & POLLIN)
-				{
-					// data ready to recev()
-					read_data();
-					if(_data_ready_event_subscirbed)
-						_data_ready_handler(*this,_output_data_buffer);
-				}
-			}
-		}
-	}
-}
 
 } /* namespace mrobot */
-
 
